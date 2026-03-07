@@ -1,0 +1,7 @@
+name = "softone-mcp-worker"
+main = "src/worker.js"
+compatibility_date = "2026-01-15"
+
+[[kv_namespaces]]
+binding = "SOFTONECACHE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

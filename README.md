@@ -61,7 +61,7 @@ npm install
 npx wrangler kv namespace create SOFTONECACHE
 ```
 
-Copy the returned namespace id and update `wrangler.jsonc`:
+Copy the returned namespace id and update `wrangler.toml`:
 
 ```jsonc
 {
@@ -121,6 +121,15 @@ npm run deploy
 
 ## CI / Cloudflare dashboard deployment notes
 
+
+If you configure a Cloudflare build/deploy command manually, use:
+
+```bash
+npx wrangler deploy --config wrangler.toml
+```
+
+This forces Wrangler to load the Worker config and prevents framework auto-detection from treating the project like static assets.
+
 If you deploy from a Cloudflare-hosted CI job (or any non-interactive runner), make sure deployment is token-based and not interactive login based.
 
 ### Recommended deploy command
@@ -129,7 +138,7 @@ If you deploy from a Cloudflare-hosted CI job (or any non-interactive runner), m
 npm ci && npm run deploy:ci
 ```
 
-If your environment does not run `npm ci` first, `npx wrangler deploy` may download Wrangler ad hoc and show warnings like "No lock file has been detected".
+If your environment does not run `npm ci` first, `npx wrangler deploy --config wrangler.toml` may download Wrangler ad hoc and show warnings like "No lock file has been detected".
 
 ### Required CI environment variables
 
@@ -217,6 +226,6 @@ curl -i -X POST 'http://127.0.0.1:8787/mcp' \
 ## Project files
 
 - `src/worker.js`: Worker runtime, MCP routing, tool handlers, SoftOne helpers.
-- `wrangler.jsonc`: Cloudflare worker config and KV binding.
+- `wrangler.toml`: Cloudflare worker config and KV binding.
 - `package.json`: minimal scripts/dependencies.
 - `.dev.vars.example`: local environment template.
