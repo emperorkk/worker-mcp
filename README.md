@@ -118,8 +118,20 @@ npm run dev
 npm run deploy
 ```
 
+If you run Wrangler directly, prefer:
+
+```bash
+npx wrangler deploy --config wrangler.toml
+```
+
 
 ## CI / Cloudflare dashboard deployment notes
+
+### Config file fallback for hosted runners
+
+This repo includes both `wrangler.toml` and `wrangler.json` with the same Worker settings.
+Some hosted runners are stricter with automatic config discovery; shipping both avoids accidental framework/static-site auto-detection when `npx wrangler deploy` is used.
+
 
 
 If you configure a Cloudflare build/deploy command manually, use:
