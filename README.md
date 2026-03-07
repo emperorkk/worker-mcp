@@ -129,6 +129,13 @@ npx wrangler deploy --config wrangler.toml
 
 ### Config file fallback for hosted runners
 
+
+### Entry file fallback
+
+A root `index.js` file is included and re-exports `src/worker.js`.
+If a runner ignores Wrangler config discovery and falls back to default entrypoint behavior, this keeps deployment pointed at the Worker code instead of framework/static auto-detection.
+
+
 This repo includes both `wrangler.toml` and `wrangler.json` with the same Worker settings.
 Some hosted runners are stricter with automatic config discovery; shipping both avoids accidental framework/static-site auto-detection when `npx wrangler deploy` is used.
 
@@ -151,6 +158,12 @@ npm ci && npm run deploy:ci
 ```
 
 If your environment does not run `npm ci` first, `npx wrangler deploy --config wrangler.toml` may download Wrangler ad hoc and show warnings like "No lock file has been detected".
+
+### Root directory in Cloudflare project settings
+
+Set the Cloudflare project **Root directory** to the folder that contains `wrangler.toml` / `wrangler.json` and `src/worker.js` (this repository root).
+
+If root directory points elsewhere, Wrangler cannot discover Worker config and may fail with static-files detection errors.
 
 ### Required CI environment variables
 
