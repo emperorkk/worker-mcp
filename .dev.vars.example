@@ -1,0 +1,10 @@
+MCP_SHARED_SECRET=replace-me
+SOFTONE_URL=https://example.softone.endpoint
+SOFTONE_USER=replace-me
+SOFTONE_PASSWORD=replace-me
+SOFTONE_APP_ID=replace-me
+SOFTONE_COMPANY=replace-me
+SOFTONE_BRANCH=replace-me
+SOFTONE_MODULE=replace-me
+SOFTONE_REFID=replace-me
+SOFTONE_AUTHENTICATE_AFTER_LOGIN=false
