@@ -1,0 +1,6 @@
+name = "worker-mcp"
+main = "src/worker.js"
+compatibility_date = "2026-01-15"
+
+[assets]
+directory = "./public"
