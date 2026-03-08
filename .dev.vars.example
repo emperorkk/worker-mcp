@@ -1,4 +1,4 @@
-MCP_AUTH_MODE=oauth
+MCP_AUTH_MODE=none
 MCP_BEARER_TOKEN=replace-me
 MCP_SHARED_SECRET=replace-me
 OAUTH_CLIENT_ID=chatgpt-client-id

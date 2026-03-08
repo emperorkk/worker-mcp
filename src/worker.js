@@ -37,7 +37,7 @@ export default {
 };
 
 async function isAuthorized(request, env) {
-  const authMode = (env.MCP_AUTH_MODE || "oauth").toLowerCase();
+  const authMode = (env.MCP_AUTH_MODE || "none").toLowerCase();
   if (authMode === "none") {
     return true;
   }

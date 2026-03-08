@@ -8,7 +8,9 @@ param(
   [ValidateSet('bearer','header')]
   [string]$AuthMethod = 'bearer',
 
-  [int]$Trdr = 1000
+  [int]$Trdr = 1000,
+
+  [bool]$ExpectUnauth401 = $false
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,17 +65,21 @@ try {
   Write-Fail "GET /health - $($_.Exception.Message)"
 }
 
-# 2) Unauthorized initialize
-try {
-  $unauthBody = @{ jsonrpc = '2.0'; id = 1; method = 'initialize'; params = @{} }
-  $unauth = Invoke-JsonPost -Url $mcpUrl -Headers @{} -Body $unauthBody
-  throw "Expected 401 but got HTTP $($unauth.StatusCode)"
-} catch {
-  if ($_.Exception.Response -and $_.Exception.Response.StatusCode.value__ -eq 401) {
-    Write-Pass 'POST /mcp without auth returns 401'
-  } else {
-    Write-Fail "POST /mcp without auth - $($_.Exception.Message)"
+# 2) Unauthenticated behavior check
+if ($ExpectUnauth401) {
+  try {
+    $unauthBody = @{ jsonrpc = '2.0'; id = 1; method = 'initialize'; params = @{} }
+    $unauth = Invoke-JsonPost -Url $mcpUrl -Headers @{} -Body $unauthBody
+    throw "Expected 401 but got HTTP $($unauth.StatusCode)"
+  } catch {
+    if ($_.Exception.Response -and $_.Exception.Response.StatusCode.value__ -eq 401) {
+      Write-Pass 'POST /mcp without auth returns 401'
+    } else {
+      Write-Fail "POST /mcp without auth - $($_.Exception.Message)"
+    }
   }
+} else {
+  Write-Host 'ℹ️ Skipping unauthenticated 401 check (MCP_AUTH_MODE=none expected).'
 }
 
 $authHeaders = @{}

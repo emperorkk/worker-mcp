@@ -24,6 +24,8 @@ Cloudflare Worker that exposes a remote MCP server for OpenAI/ChatGPT and connec
 
 This Worker now supports OAuth authorization code + PKCE for ChatGPT App Builder.
 
+Authentication is optional by default (`MCP_AUTH_MODE=none`) so connections can be established without auth.
+
 ### OAuth metadata URL
 
 ```text
@@ -37,18 +39,18 @@ https://worker-mcp.kkourentzes.workers.dev/.well-known/oauth-authorization-serve
 
 ### Required auth env vars
 
-- `MCP_AUTH_MODE=oauth` (recommended)
+- `MCP_AUTH_MODE=none` (default, allows connections without authentication)
 - `OAUTH_CLIENT_ID`
 - `OAUTH_CLIENT_SECRET` (set to `softone` if you want the simple default)
 - `OAUTH_ISSUER_URL` (public origin)
 
 Supported auth modes:
 
-- `oauth` (required result for ChatGPT app builder)
+- `none` (default, no authentication required)
+- `oauth` (authorization code + PKCE)
 - `bearer` (static bearer token)
 - `header` (legacy `x-mcp-secret`)
 - `either` (accepts header + bearer + oauth)
-- `none` (testing only)
 
 ## SoftOne env vars
 
@@ -85,7 +87,8 @@ npx wrangler kv namespace create SOFTONECACHE
 In your custom app MCP server config:
 
 - MCP Server URL: `https://worker-mcp.kkourentzes.workers.dev/mcp`
-- Auth type: `OAuth`
+- Auth type: `None` (works with `MCP_AUTH_MODE=none`)
+- Or Auth type: `OAuth` (if you switch `MCP_AUTH_MODE=oauth`)
 - Authorization URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/authorize`
 - Token URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/token`
 - Client ID: value of `OAUTH_CLIENT_ID`
