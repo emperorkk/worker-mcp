@@ -10,47 +10,15 @@ Cloudflare Worker that exposes a remote MCP server for OpenAI/ChatGPT and connec
 
 - `GET /health`
 - `POST /mcp`
-- `GET /.well-known/oauth-authorization-server`
-- `GET /oauth/authorize`
-- `POST /oauth/token`
-- `POST /oauth/revoke`
 
 ## Tools
 
 - `getCustomer` (implemented with `selectorFields`)
 - `searchCustomers` (safe stub until tenant browser payload is provided)
 
-## OAuth support (required)
+## Authentication
 
-This Worker now supports OAuth authorization code + PKCE for ChatGPT App Builder.
-
-Authentication is optional by default (`MCP_AUTH_MODE=none`) so connections can be established without auth.
-
-### OAuth metadata URL
-
-```text
-https://worker-mcp.kkourentzes.workers.dev/.well-known/oauth-authorization-server
-```
-
-### OAuth endpoints
-
-- Authorization URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/authorize`
-- Token URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/token`
-
-### Required auth env vars
-
-- `MCP_AUTH_MODE=none` (default, allows connections without authentication)
-- `OAUTH_CLIENT_ID`
-- `OAUTH_CLIENT_SECRET` (set to `softone` if you want the simple default)
-- `OAUTH_ISSUER_URL` (public origin)
-
-Supported auth modes:
-
-- `none` (default, no authentication required)
-- `oauth` (authorization code + PKCE)
-- `bearer` (static bearer token)
-- `header` (legacy `x-mcp-secret`)
-- `either` (accepts header + bearer + oauth)
+This worker does **not** require authentication for MCP calls. `POST /mcp` is open by design.
 
 ## SoftOne env vars
 
@@ -68,7 +36,7 @@ Supported auth modes:
 
 Binding name: `SOFTONECACHE`
 
-If bound, it stores SoftOne sessions and OAuth artifacts across requests. If not bound, Worker uses in-memory cache.
+If bound, it stores SoftOne sessions across requests. If not bound, Worker uses in-memory cache.
 
 ## Cloudflare setup
 
@@ -82,25 +50,12 @@ KV create command:
 npx wrangler kv namespace create SOFTONECACHE
 ```
 
-## ChatGPT App Builder setup (OAuth)
+## ChatGPT App Builder setup
 
 In your custom app MCP server config:
 
 - MCP Server URL: `https://worker-mcp.kkourentzes.workers.dev/mcp`
-- Auth type: `None` (works with `MCP_AUTH_MODE=none`)
-- Or Auth type: `OAuth` (if you switch `MCP_AUTH_MODE=oauth`)
-- Authorization URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/authorize`
-- Token URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/token`
-- Client ID: value of `OAUTH_CLIENT_ID`
-- Client Secret: value of `OAUTH_CLIENT_SECRET`
-- Client Secret quick-start value: `softone`
-- Scopes: `mcp`
-
-Notes:
-
-- This is the mode your screenshot requires.
-- The previous custom header-only approach is kept for backward compatibility but is not required for ChatGPT OAuth flow.
-- If `OAUTH_CLIENT_SECRET` is unset, the Worker defaults to `softone` (quick-start only; rotate in production).
+- Auth type: `None`
 
 ## Local development
 
@@ -116,14 +71,13 @@ npm run dev
 npm run deploy
 ```
 
-## MCP examples (bearer)
+## MCP examples (no auth)
 
 ### initialize
 
 ```bash
 curl -i -X POST 'http://127.0.0.1:8787/mcp' \
   -H 'content-type: application/json' \
-  -H 'authorization: Bearer YOUR_ACCESS_TOKEN' \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 ```
 
@@ -132,7 +86,6 @@ curl -i -X POST 'http://127.0.0.1:8787/mcp' \
 ```bash
 curl -i -X POST 'http://127.0.0.1:8787/mcp' \
   -H 'content-type: application/json' \
-  -H 'authorization: Bearer YOUR_ACCESS_TOKEN' \
   --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
 
@@ -141,7 +94,6 @@ curl -i -X POST 'http://127.0.0.1:8787/mcp' \
 ```bash
 curl -i -X POST 'http://127.0.0.1:8787/mcp' \
   -H 'content-type: application/json' \
-  -H 'authorization: Bearer YOUR_ACCESS_TOKEN' \
   --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"getCustomer","arguments":{"trdr":1000}}}'
 ```
 
@@ -150,8 +102,6 @@ curl -i -X POST 'http://127.0.0.1:8787/mcp' \
 ```powershell
 pwsh -File .\scripts\check-worker.ps1 `
   -BaseUrl "https://worker-mcp.kkourentzes.workers.dev" `
-  -McpSecret "YOUR_ACCESS_TOKEN" `
-  -AuthMethod bearer `
   -Trdr 1000
 ```
 
