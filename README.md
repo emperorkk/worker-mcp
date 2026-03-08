@@ -271,6 +271,28 @@ curl -i -X POST 'http://127.0.0.1:8787/mcp' \
   }'
 ```
 
+
+## PowerShell smoke test script
+
+A ready script is included at `scripts/check-worker.ps1` to validate deployment end-to-end.
+
+Run it from PowerShell:
+
+```powershell
+pwsh -File .\scripts\check-worker.ps1 `
+  -BaseUrl "https://worker-mcp.kkourentzes.workers.dev" `
+  -McpSecret "YOUR_MCP_SHARED_SECRET" `
+  -Trdr 1000
+```
+
+What it checks:
+- `GET /health`
+- `POST /mcp` unauthorized returns `401`
+- `initialize`
+- `tools/list`
+- `tools/call searchCustomers` stub response
+- `tools/call getCustomer` (valid response shape or `not_found`)
+
 ## SoftOne request notes
 
 - `getCustomer` uses `selectorFields` with:
