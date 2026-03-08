@@ -1,6 +1,9 @@
-MCP_SHARED_SECRET=replace-me
+MCP_AUTH_MODE=oauth
 MCP_BEARER_TOKEN=replace-me
-MCP_AUTH_MODE=either
+MCP_SHARED_SECRET=replace-me
+OAUTH_CLIENT_ID=chatgpt-client-id
+OAUTH_CLIENT_SECRET=replace-me
+OAUTH_ISSUER_URL=https://worker-mcp.kkourentzes.workers.dev
 SOFTONE_URL=https://example.softone.endpoint
 SOFTONE_USER=replace-me
 SOFTONE_PASSWORD=replace-me

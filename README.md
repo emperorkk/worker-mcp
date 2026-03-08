@@ -1,128 +1,107 @@
 # SoftOne MCP Worker (Cloudflare)
 
-A minimal remote MCP server that runs on Cloudflare Workers and connects OpenAI/Codex to SoftOne ERP through **SoftOne Web Services** only.
+Cloudflare Worker that exposes a remote MCP server for OpenAI/ChatGPT and connects to SoftOne ERP only through documented SoftOne Web Services.
 
 ## Architecture
 
-`OpenAI/Codex -> Cloudflare Worker MCP endpoint -> SoftOne Web Services`
+`ChatGPT/Codex -> Cloudflare Worker MCP -> SoftOne WS`
 
-This project intentionally avoids direct SQL/database access and keeps all ERP communication inside documented SoftOne WS patterns.
+## Endpoints
 
-## Why SoftOne Web Services (not direct SQL)
+- `GET /health`
+- `POST /mcp`
+- `GET /.well-known/oauth-authorization-server`
+- `GET /oauth/authorize`
+- `POST /oauth/token`
+- `POST /oauth/revoke`
 
-- Keeps integration aligned with SoftOne supported interfaces.
-- Avoids coupling to internal database schema.
-- Enables clearer security boundaries and credential handling.
-- Fits remote MCP tool patterns over HTTP.
+## Tools
 
-## Current tool scope
+- `getCustomer` (implemented with `selectorFields`)
+- `searchCustomers` (safe stub until tenant browser payload is provided)
 
-Implemented tools:
+## OAuth support (required)
 
-1. `searchCustomers`
-2. `getCustomer`
+This Worker now supports OAuth authorization code + PKCE for ChatGPT App Builder.
 
-### `getCustomer` status
+### OAuth metadata URL
 
-Implemented with documented `selectorFields` pattern for object/table `CUSTOMER`, key `TRDR`, and fields:
+```text
+https://worker-mcp.kkourentzes.workers.dev/.well-known/oauth-authorization-server
+```
 
-- `CODE`
-- `NAME`
-- `ADDRESS`
-- `CITY`
-- `COUNTRY`
-- `AFM`
+### OAuth endpoints
 
-### `searchCustomers` status
+- Authorization URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/authorize`
+- Token URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/token`
 
-Implemented as a **safe stub**.
+### Required auth env vars
 
-- Assumption: customer search via `getBrowserInfo/getBrowserData` requires tenant specific browser/list setup.
-- TODO: provide one working SoftOne example payload from your environment for CUSTOMER browsing/search to finalize this tool without inventing request shapes.
+- `MCP_AUTH_MODE=oauth` (recommended)
+- `OAUTH_CLIENT_ID`
+- `OAUTH_CLIENT_SECRET` (recommended)
+- `OAUTH_ISSUER_URL` (public origin)
 
-## Prerequisites
+Supported auth modes:
 
-- Node.js 18+
-- Cloudflare account
-- Wrangler CLI (installed via dev dependency)
-- Access to SoftOne Web Services endpoint and credentials
+- `oauth` (required result for ChatGPT app builder)
+- `bearer` (static bearer token)
+- `header` (legacy `x-mcp-secret`)
+- `either` (accepts header + bearer + oauth)
+- `none` (testing only)
+
+## SoftOne env vars
+
+- `SOFTONE_URL`
+- `SOFTONE_USER`
+- `SOFTONE_PASSWORD`
+- `SOFTONE_APP_ID`
+- `SOFTONE_COMPANY`
+- `SOFTONE_BRANCH`
+- `SOFTONE_MODULE`
+- `SOFTONE_REFID`
+- Optional: `SOFTONE_AUTHENTICATE_AFTER_LOGIN=true`
+
+## Optional KV binding
+
+Binding name: `SOFTONECACHE`
+
+If bound, it stores SoftOne sessions and OAuth artifacts across requests. If not bound, Worker uses in-memory cache.
 
 ## Cloudflare setup
 
-### 1) Install dependencies
+1. Deploy Worker.
+2. In **Workers & Pages -> worker-mcp -> Settings -> Variables and Secrets**, set env vars.
+3. (Optional) Create KV namespace and bind it as `SOFTONECACHE`.
 
-```bash
-npm install
-```
-
-### 2) (Optional) Create KV namespace for shared session cache
-
-KV is optional now. If you do not bind `SOFTONECACHE`, the Worker uses an in-memory cache per isolate.
-
-Create KV only if you want better session reuse across isolates:
+KV create command:
 
 ```bash
 npx wrangler kv namespace create SOFTONECACHE
 ```
 
-Then bind the returned id in `wrangler.toml` / `wrangler.json` or in Cloudflare dashboard Worker bindings.
+## ChatGPT App Builder setup (OAuth)
 
-### 3) Set required secrets / vars
+In your custom app MCP server config:
 
-#### Where to set variables in Cloudflare
+- MCP Server URL: `https://worker-mcp.kkourentzes.workers.dev/mcp`
+- Auth type: `OAuth`
+- Authorization URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/authorize`
+- Token URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/token`
+- Client ID: value of `OAUTH_CLIENT_ID`
+- Client Secret: value of `OAUTH_CLIENT_SECRET`
+- Scopes: `mcp`
 
-For a Worker connected via **Workers Builds**:
+Notes:
 
-1. Cloudflare Dashboard -> **Workers & Pages** -> your Worker (`worker-mcp`)
-2. Open **Settings** -> **Variables and Secrets**
-3. Add plain text values under **Variables**
-4. Add sensitive values under **Secrets**
-
-For CLI deployment, you can also use Wrangler:
-
-```bash
-npx wrangler secret put MCP_SHARED_SECRET
-npx wrangler secret put SOFTONE_PASSWORD
-```
-
-Non-secret values can be set in dashboard variables or via Wrangler config environments.
-
-Set sensitive values as secrets:
-
-```bash
-npx wrangler secret put MCP_SHARED_SECRET
-npx wrangler secret put SOFTONE_PASSWORD
-```
-
-Set the rest as environment variables in Cloudflare Dashboard (Settings -> Variables and Secrets):
-
-- `SOFTONE_URL`: SoftOne WS URL (JSON POST endpoint)
-- `SOFTONE_USER`: SoftOne username
-- `SOFTONE_APP_ID`: SoftOne application id
-- `SOFTONE_COMPANY`: SoftOne company code/value
-- `SOFTONE_BRANCH`: SoftOne branch code/value
-- `SOFTONE_MODULE`: SoftOne module code/value
-- `SOFTONE_REFID`: SoftOne ref id
-- `MCP_SHARED_SECRET`: legacy shared secret for `x-mcp-secret`
-- `MCP_BEARER_TOKEN`: bearer token used with `Authorization: Bearer <token>`
-- `MCP_AUTH_MODE`: `bearer`, `header`, `either`, or `none`
-- `SOFTONECACHE` (optional binding): KV namespace used for cross-request session cache
-
-Optional:
-
-- `SOFTONE_AUTHENTICATE_AFTER_LOGIN=true` to run an additional documented `authenticate` call after login for installations that require it.
+- This is the mode your screenshot requires.
+- The previous custom header-only approach is kept for backward compatibility but is not required for ChatGPT OAuth flow.
 
 ## Local development
 
-Create a local env file from the example:
-
 ```bash
+npm install
 cp .dev.vars.example .dev.vars
-```
-
-Then run:
-
-```bash
 npm run dev
 ```
 
@@ -132,142 +111,15 @@ npm run dev
 npm run deploy
 ```
 
-If you run Wrangler directly, prefer:
-
-```bash
-npx wrangler deploy --config wrangler.toml
-```
-
-
-## CI / Cloudflare dashboard deployment notes
-
-### Config file fallback for hosted runners
-
-
-### Entry file fallback
-
-A root `index.js` file is included and re-exports `src/worker.js`.
-If a runner ignores Wrangler config discovery and falls back to default entrypoint behavior, this keeps deployment pointed at the Worker code instead of framework/static auto-detection.
-
-
-This repo includes both `wrangler.toml` and `wrangler.json` with the same Worker settings.
-Some hosted runners are stricter with automatic config discovery; shipping both avoids accidental framework/static-site auto-detection when `npx wrangler deploy` is used.
-
-
-
-If you configure a Cloudflare build/deploy command manually, use:
-
-```bash
-npx wrangler deploy --config wrangler.toml
-```
-
-This forces Wrangler to load the Worker config and prevents framework auto-detection from treating the project like static assets.
-
-If you deploy from a Cloudflare-hosted CI job (or any non-interactive runner), make sure deployment is token-based and not interactive login based.
-
-### Recommended deploy command
-
-```bash
-npm ci && npm run deploy:ci
-```
-
-If your environment does not run `npm ci` first, `npx wrangler deploy --config wrangler.toml` may download Wrangler ad hoc and show warnings like "No lock file has been detected".
-
-
-### If you still get "Could not detect a directory containing static files"
-
-That error usually means the deployment is running in a **Pages/framework auto-detect path** instead of reading Worker config.
-
-Use this checklist:
-
-1. Ensure project root is this repository root.
-2. Set deploy command to:
-
-```bash
-npx wrangler deploy --config wrangler.toml
-```
-
-3. In Cloudflare dashboard, use Worker-style deployment settings (not framework preset auto-detection).
-4. This repo now includes `public/index.html` and `assets.directory = "./public"` as a fallback so auto-detection has a static directory available.
-
-### Root directory in Cloudflare project settings
-
-Set the Cloudflare project **Root directory** to the folder that contains `wrangler.toml` / `wrangler.json` and `src/worker.js` (this repository root).
-
-If root directory points elsewhere, Wrangler cannot discover Worker config and may fail with static-files detection errors.
-
-### Worker name note
-
-Config uses Worker name `worker-mcp` to match Cloudflare CI expected name and avoid name-mismatch warnings.
-
-### Required CI environment variables
-
-- `CLOUDFLARE_API_TOKEN`: API token with Workers Scripts edit permissions
-- `CLOUDFLARE_ACCOUNT_ID`: target Cloudflare account id
-
-Without these, Wrangler may wait for interactive auth/login behavior and deployment can appear stuck after startup logs.
-
-### Optional noise reduction for CI logs
-
-- `WRANGLER_SEND_METRICS=false`
-
-This disables telemetry sending in CI and keeps logs quieter.
-
-## Endpoints
-
-- `GET /health`
-- `POST /mcp`
-
-## Security
-
-`POST /mcp` supports the following authentication modes:
-
-- Standard bearer token: `Authorization: Bearer <token>`
-- Legacy header: `x-mcp-secret: <MCP_SHARED_SECRET>`
-
-Configure behavior with:
-
-- `MCP_AUTH_MODE=bearer` (recommended for ChatGPT app builder)
-- `MCP_AUTH_MODE=header` (legacy mode)
-- `MCP_AUTH_MODE=either` (default, accepts both)
-- `MCP_AUTH_MODE=none` (not recommended except controlled testing)
-
-Token values:
-
-- `MCP_BEARER_TOKEN` for bearer token auth
-- `MCP_SHARED_SECRET` for legacy header auth
-- If `MCP_BEARER_TOKEN` is missing, bearer mode falls back to `MCP_SHARED_SECRET`
-
-If auth is required and credentials are missing or invalid, server returns `401`.
-
-
-## ChatGPT app builder setup (OAuth-compatible auth)
-
-For the ChatGPT app-builder UI, use standard bearer auth instead of custom headers.
-
-1. Set Worker env vars:
-   - `MCP_AUTH_MODE=bearer`
-   - `MCP_BEARER_TOKEN=<strong-random-token>`
-2. In ChatGPT app builder, choose auth mode that sends a Bearer token in `Authorization` header.
-3. Configure that same token value in the ChatGPT connector/app settings.
-4. Use MCP URL: `https://worker-mcp.kkourentzes.workers.dev/mcp`
-
-Assumption: your current ChatGPT UI does not expose static custom header fields for `x-mcp-secret`, so bearer auth is the compatible path.
-
-## MCP JSON-RPC examples
+## MCP examples (bearer)
 
 ### initialize
 
 ```bash
 curl -i -X POST 'http://127.0.0.1:8787/mcp' \
   -H 'content-type: application/json' \
-  -H 'authorization: Bearer YOUR_MCP_BEARER_TOKEN' \
-  --data '{
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {}
-  }'
+  -H 'authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 ```
 
 ### tools/list
@@ -275,13 +127,8 @@ curl -i -X POST 'http://127.0.0.1:8787/mcp' \
 ```bash
 curl -i -X POST 'http://127.0.0.1:8787/mcp' \
   -H 'content-type: application/json' \
-  -H 'authorization: Bearer YOUR_MCP_BEARER_TOKEN' \
-  --data '{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/list",
-    "params": {}
-  }'
+  -H 'authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
 
 ### tools/call getCustomer
@@ -289,54 +136,22 @@ curl -i -X POST 'http://127.0.0.1:8787/mcp' \
 ```bash
 curl -i -X POST 'http://127.0.0.1:8787/mcp' \
   -H 'content-type: application/json' \
-  -H 'authorization: Bearer YOUR_MCP_BEARER_TOKEN' \
-  --data '{
-    "jsonrpc": "2.0",
-    "id": 3,
-    "method": "tools/call",
-    "params": {
-      "name": "getCustomer",
-      "arguments": { "trdr": 1000 }
-    }
-  }'
+  -H 'authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"getCustomer","arguments":{"trdr":1000}}}'
 ```
 
-
-## PowerShell smoke test script
-
-A ready script is included at `scripts/check-worker.ps1` to validate deployment end-to-end.
-
-Run it from PowerShell:
+## PowerShell smoke test
 
 ```powershell
 pwsh -File .\scripts\check-worker.ps1 `
   -BaseUrl "https://worker-mcp.kkourentzes.workers.dev" `
-  -McpSecret "YOUR_MCP_BEARER_TOKEN" `
+  -McpSecret "YOUR_ACCESS_TOKEN" `
   -AuthMethod bearer `
   -Trdr 1000
 ```
 
-What it checks:
-- `GET /health`
-- `POST /mcp` unauthorized returns `401`
-- `initialize`
-- `tools/list`
-- `tools/call searchCustomers` stub response
-- `tools/call getCustomer` (valid response shape or `not_found`)
+## Important assumptions and TODO
 
-## SoftOne request notes
-
-- `getCustomer` uses `selectorFields` with:
-  - `TABLENAME: CUSTOMER`
-  - `KEYNAME: TRDR`
-  - `KEYVALUE: <trdr>`
-  - `RESULTFIELDS: CODE,NAME,ADDRESS,CITY,COUNTRY,AFM`
-- Session handling uses `login`, optional `authenticate`, and one retry on session-like failure.
-- Search intentionally does **not** guess undocumented browser payload details.
-
-## Project files
-
-- `src/worker.js`: Worker runtime, MCP routing, tool handlers, SoftOne helpers.
-- `wrangler.toml`: Cloudflare worker config and KV binding.
-- `package.json`: minimal scripts/dependencies.
-- `.dev.vars.example`: local environment template.
+- Assumption: SoftOne WS accepts JSON POST payloads as used here.
+- Assumption: `selectorFields` request with `CUSTOMER/TRDR/RESULTFIELDS` is valid in your tenant.
+- TODO: `searchCustomers` must be finished using a real tenant example for `getBrowserInfo/getBrowserData`.

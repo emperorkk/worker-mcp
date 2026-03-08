@@ -1,4 +1,4 @@
-const cacheSessionKey = "softone-session";
+const softoneSessionKey = "softone-session";
 const memoryCache = new Map();
 
 export default {
@@ -6,14 +6,27 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return jsonResponse(200, {
-        status: "ok",
-        service: "worker-mcp"
-      });
+      return jsonResponse(200, { status: "ok", service: "worker-mcp" });
+    }
+
+    if (request.method === "GET" && url.pathname === "/.well-known/oauth-authorization-server") {
+      return handleOauthMetadata(request, env);
+    }
+
+    if (request.method === "GET" && url.pathname === "/oauth/authorize") {
+      return handleOauthAuthorize(request, env);
+    }
+
+    if (request.method === "POST" && url.pathname === "/oauth/token") {
+      return handleOauthToken(request, env);
+    }
+
+    if (request.method === "POST" && url.pathname === "/oauth/revoke") {
+      return handleOauthRevoke(request, env);
     }
 
     if (request.method === "POST" && url.pathname === "/mcp") {
-      if (!isAuthorized(request, env)) {
+      if (!(await isAuthorized(request, env))) {
         return jsonRpcErrorResponse(null, -32001, "Unauthorized", 401);
       }
       return handleMcpRequest(request, env);
@@ -23,40 +36,41 @@ export default {
   }
 };
 
-function isAuthorized(request, env) {
-  const authMode = (env.MCP_AUTH_MODE || "either").toLowerCase();
+async function isAuthorized(request, env) {
+  const authMode = (env.MCP_AUTH_MODE || "oauth").toLowerCase();
   if (authMode === "none") {
     return true;
   }
 
-  const tokenFromLegacyHeader = request.headers.get("x-mcp-secret");
-  const tokenFromBearer = readBearerToken(request.headers.get("authorization"));
-  const sharedSecret = env.MCP_SHARED_SECRET;
-  const bearerToken = env.MCP_BEARER_TOKEN || env.MCP_SHARED_SECRET;
+  const headerToken = request.headers.get("x-mcp-secret");
+  const bearerToken = readBearerToken(request.headers.get("authorization"));
+  const legacySecret = env.MCP_SHARED_SECRET;
+  const staticBearerToken = env.MCP_BEARER_TOKEN || env.MCP_SHARED_SECRET;
 
-  const headerIsValid = Boolean(sharedSecret) && tokenFromLegacyHeader === sharedSecret;
-  const bearerIsValid = Boolean(bearerToken) && tokenFromBearer === bearerToken;
+  const headerIsValid = Boolean(legacySecret) && headerToken === legacySecret;
+  const staticBearerIsValid = Boolean(staticBearerToken) && bearerToken === staticBearerToken;
+  const oauthBearerIsValid = bearerToken ? await isValidOauthToken(env, bearerToken) : false;
 
   if (authMode === "header") {
     return headerIsValid;
   }
   if (authMode === "bearer") {
-    return bearerIsValid;
+    return staticBearerIsValid;
+  }
+  if (authMode === "oauth") {
+    return oauthBearerIsValid;
   }
 
-  return headerIsValid || bearerIsValid;
+  return headerIsValid || staticBearerIsValid || oauthBearerIsValid;
 }
 
 function readBearerToken(authorizationHeader) {
   if (!authorizationHeader || typeof authorizationHeader !== "string") {
     return null;
   }
-
-  const lower = authorizationHeader.toLowerCase();
-  if (!lower.startsWith("bearer ")) {
+  if (!authorizationHeader.toLowerCase().startsWith("bearer ")) {
     return null;
   }
-
   return authorizationHeader.slice(7).trim();
 }
 
@@ -74,46 +88,34 @@ async function handleMcpRequest(request, env) {
 
   const requestId = body.id ?? null;
 
-  switch (body.method) {
-    case "initialize":
-      return jsonRpcResultResponse(requestId, {
-        protocolVersion: "2024-11-05",
-        serverInfo: {
-          name: "worker-mcp",
-          version: "0.1.0"
-        },
-        capabilities: {
-          tools: {}
-        }
-      });
-
-    case "tools/list":
-      return jsonRpcResultResponse(requestId, {
-        tools: getToolDefinitions()
-      });
-
-    case "tools/call":
-      return handleToolsCall(requestId, body.params, env);
-
-    default:
-      return jsonRpcErrorResponse(requestId, -32601, "Method not found", 404);
+  if (body.method === "initialize") {
+    return jsonRpcResultResponse(requestId, {
+      protocolVersion: "2024-11-05",
+      serverInfo: { name: "worker-mcp", version: "0.2.0" },
+      capabilities: { tools: {} }
+    });
   }
+
+  if (body.method === "tools/list") {
+    return jsonRpcResultResponse(requestId, { tools: getToolDefinitions() });
+  }
+
+  if (body.method === "tools/call") {
+    return handleToolsCall(requestId, body.params, env);
+  }
+
+  return jsonRpcErrorResponse(requestId, -32601, "Method not found", 404);
 }
 
 function getToolDefinitions() {
   return [
     {
       name: "searchCustomers",
-      description:
-        "Search customers by code, name, or AFM using SoftOne browser/list APIs. Currently a safe stub until tenant-specific browser configuration is provided.",
+      description: "Search customers by code, name, or AFM using SoftOne browser/list APIs.",
       inputSchema: {
         type: "object",
         properties: {
-          query: {
-            type: "string",
-            minLength: 1,
-            description: "Search text for CODE, NAME, or AFM"
-          }
+          query: { type: "string", minLength: 1, description: "Search text for CODE, NAME, or AFM" }
         },
         required: ["query"],
         additionalProperties: false
@@ -124,12 +126,7 @@ function getToolDefinitions() {
       description: "Fetch one customer by TRDR id and return core fields",
       inputSchema: {
         type: "object",
-        properties: {
-          trdr: {
-            type: "number",
-            description: "SoftOne TRDR id"
-          }
-        },
+        properties: { trdr: { type: "number", description: "SoftOne TRDR id" } },
         required: ["trdr"],
         additionalProperties: false
       }
@@ -154,12 +151,9 @@ async function handleToolsCall(requestId, params, env) {
             text: JSON.stringify(
               {
                 status: "needs_softone_browser_config",
-                message:
-                  "Provide a working getBrowserInfo/getBrowserData example for CUSTOMER to complete this tool.",
-                assumption:
-                  "Customer search needs tenant-specific browser/list configuration that is not safely inferable from generic docs.",
-                todo:
-                  "Implement this tool using documented getBrowserInfo + getBrowserData payloads from your SoftOne environment."
+                message: "Provide a working getBrowserInfo/getBrowserData example for CUSTOMER to complete this tool.",
+                assumption: "Customer search needs tenant-specific browser/list configuration that is not safely inferable from generic docs.",
+                todo: "Implement this tool using documented getBrowserInfo + getBrowserData payloads from your SoftOne environment."
               },
               null,
               2
@@ -179,23 +173,13 @@ async function handleToolsCall(requestId, params, env) {
       const customer = await fetchCustomerByTrdr(env, trdr);
       if (!customer) {
         return jsonRpcResultResponse(requestId, {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({ status: "not_found", trdr }, null, 2)
-            }
-          ],
+          content: [{ type: "text", text: JSON.stringify({ status: "not_found", trdr }, null, 2) }],
           isError: false
         });
       }
 
       return jsonRpcResultResponse(requestId, {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(customer, null, 2)
-          }
-        ],
+        content: [{ type: "text", text: JSON.stringify(customer, null, 2) }],
         isError: false
       });
     }
@@ -206,15 +190,7 @@ async function handleToolsCall(requestId, params, env) {
       content: [
         {
           type: "text",
-          text: JSON.stringify(
-            {
-              status: "error",
-              message: "Tool execution failed",
-              details: safeErrorMessage(error)
-            },
-            null,
-            2
-          )
+          text: JSON.stringify({ status: "error", message: "Tool execution failed", details: safeErrorMessage(error) }, null, 2)
         }
       ],
       isError: true
@@ -240,25 +216,23 @@ async function fetchCustomerByTrdr(env, trdr) {
   };
 
   let response = await softonePost(env, payload);
-
   if (looksLikeSessionError(response)) {
-    const freshClientId = await loginAndCacheClientId(env, true);
-    payload.clientID = freshClientId;
+    payload.clientID = await loginAndCacheClientId(env, true);
     response = await softonePost(env, payload);
   }
 
-  const firstRow = pickFirstCustomerRow(response);
-  if (!firstRow) {
+  const row = pickFirstCustomerRow(response);
+  if (!row) {
     return null;
   }
 
   return {
-    CODE: firstRow.CODE ?? "",
-    NAME: firstRow.NAME ?? "",
-    ADDRESS: firstRow.ADDRESS ?? "",
-    CITY: firstRow.CITY ?? "",
-    COUNTRY: firstRow.COUNTRY ?? "",
-    AFM: firstRow.AFM ?? ""
+    CODE: row.CODE ?? "",
+    NAME: row.NAME ?? "",
+    ADDRESS: row.ADDRESS ?? "",
+    CITY: row.CITY ?? "",
+    COUNTRY: row.COUNTRY ?? "",
+    AFM: row.AFM ?? ""
   };
 }
 
@@ -267,15 +241,7 @@ function pickFirstCustomerRow(response) {
     return null;
   }
 
-  const candidates = [
-    response.result,
-    response.rows,
-    response.data,
-    response.Result,
-    response.Rows,
-    response.Data
-  ];
-
+  const candidates = [response.result, response.rows, response.data, response.Result, response.Rows, response.Data];
   for (const candidate of candidates) {
     if (Array.isArray(candidate) && candidate.length > 0) {
       return candidate[0];
@@ -298,9 +264,9 @@ function pickFirstCustomerRow(response) {
 
 async function getValidClientId(env) {
   const cache = getCacheStore(env);
-  const cachedClientId = await cache.get(cacheSessionKey);
-  if (cachedClientId) {
-    return cachedClientId;
+  const clientId = await cache.getText(softoneSessionKey);
+  if (clientId) {
+    return clientId;
   }
   return loginAndCacheClientId(env, false);
 }
@@ -308,10 +274,10 @@ async function getValidClientId(env) {
 async function loginAndCacheClientId(env, forceRefresh) {
   const cache = getCacheStore(env);
   if (forceRefresh) {
-    await cache.delete(cacheSessionKey);
+    await cache.delete(softoneSessionKey);
   }
 
-  const loginPayload = {
+  const loginResponse = await softonePost(env, {
     service: "login",
     username: env.SOFTONE_USER,
     password: env.SOFTONE_PASSWORD,
@@ -320,21 +286,17 @@ async function loginAndCacheClientId(env, forceRefresh) {
     BRANCH: env.SOFTONE_BRANCH,
     MODULE: env.SOFTONE_MODULE,
     REFID: env.SOFTONE_REFID
-  };
+  });
 
-  const loginResponse = await softonePost(env, loginPayload);
   const clientId = extractClientId(loginResponse);
-
   if (!clientId) {
     throw new Error("Unable to establish SoftOne session");
   }
 
-  await cache.put(cacheSessionKey, clientId, {
-    expirationTtl: 60 * 30
-  });
+  await cache.putText(softoneSessionKey, clientId, 60 * 30);
 
-  if (typeof env.SOFTONE_AUTHENTICATE_AFTER_LOGIN === "string" && env.SOFTONE_AUTHENTICATE_AFTER_LOGIN.toLowerCase() === "true") {
-    // Assumption: Some installations may require authenticate after login.
+  if ((env.SOFTONE_AUTHENTICATE_AFTER_LOGIN || "false").toLowerCase() === "true") {
+    // Assumption: Some installations require authenticate after login.
     await softonePost(env, {
       service: "authenticate",
       clientID: clientId,
@@ -345,66 +307,21 @@ async function loginAndCacheClientId(env, forceRefresh) {
   return clientId;
 }
 
-
-function getCacheStore(env) {
-  const kv = env.SOFTONECACHE;
-  if (kv && typeof kv.get === "function" && typeof kv.put === "function" && typeof kv.delete === "function") {
-    return kv;
-  }
-
-  return {
-    async get(key) {
-      const entry = memoryCache.get(key);
-      if (!entry) {
-        return null;
-      }
-      if (entry.expiresAt && entry.expiresAt < Date.now()) {
-        memoryCache.delete(key);
-        return null;
-      }
-      return entry.value;
-    },
-    async put(key, value, options) {
-      const ttlSeconds = options?.expirationTtl;
-      const expiresAt = Number.isFinite(ttlSeconds) ? Date.now() + ttlSeconds * 1000 : null;
-      memoryCache.set(key, { value, expiresAt });
-    },
-    async delete(key) {
-      memoryCache.delete(key);
-    }
-  };
-}
-
 function extractClientId(response) {
   if (!response || typeof response !== "object") {
     return null;
   }
 
-  const directKeys = [
-    response.clientID,
-    response.clientId,
-    response.CLIENTID,
-    response.sid,
-    response.SID,
-    response.session,
-    response.SESSION
-  ];
-
-  for (const value of directKeys) {
+  const directCandidates = [response.clientID, response.clientId, response.CLIENTID, response.sid, response.SID, response.session, response.SESSION];
+  for (const value of directCandidates) {
     if (typeof value === "string" && value.length > 0) {
       return value;
     }
   }
 
   if (response.result && typeof response.result === "object") {
-    const nestedKeys = [
-      response.result.clientID,
-      response.result.clientId,
-      response.result.CLIENTID,
-      response.result.sid,
-      response.result.SID
-    ];
-    for (const value of nestedKeys) {
+    const nestedCandidates = [response.result.clientID, response.result.clientId, response.result.CLIENTID, response.result.sid, response.result.SID];
+    for (const value of nestedCandidates) {
       if (typeof value === "string" && value.length > 0) {
         return value;
       }
@@ -418,23 +335,8 @@ function looksLikeSessionError(response) {
   if (!response || typeof response !== "object") {
     return false;
   }
-
-  const errorText = [response.error, response.message, response.Error, response.Message]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  if (!errorText) {
-    return false;
-  }
-
-  return (
-    errorText.includes("session") ||
-    errorText.includes("client") ||
-    errorText.includes("authenticate") ||
-    errorText.includes("login") ||
-    errorText.includes("expired")
-  );
+  const errorText = [response.error, response.message, response.Error, response.Message].filter(Boolean).join(" ").toLowerCase();
+  return ["session", "client", "authenticate", "login", "expired"].some((word) => errorText.includes(word));
 }
 
 async function softonePost(env, payload) {
@@ -442,9 +344,7 @@ async function softonePost(env, payload) {
 
   const response = await fetch(env.SOFTONE_URL, {
     method: "POST",
-    headers: {
-      "content-type": "application/json"
-    },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
   });
 
@@ -464,17 +364,7 @@ async function softonePost(env, payload) {
 }
 
 function validateSoftoneConfig(env) {
-  const requiredKeys = [
-    "SOFTONE_URL",
-    "SOFTONE_USER",
-    "SOFTONE_PASSWORD",
-    "SOFTONE_APP_ID",
-    "SOFTONE_COMPANY",
-    "SOFTONE_BRANCH",
-    "SOFTONE_MODULE",
-    "SOFTONE_REFID"
-  ];
-
+  const requiredKeys = ["SOFTONE_URL", "SOFTONE_USER", "SOFTONE_PASSWORD", "SOFTONE_APP_ID", "SOFTONE_COMPANY", "SOFTONE_BRANCH", "SOFTONE_MODULE", "SOFTONE_REFID"];
   for (const key of requiredKeys) {
     if (!env[key]) {
       throw new Error(`Missing environment variable: ${key}`);
@@ -482,31 +372,305 @@ function validateSoftoneConfig(env) {
   }
 }
 
-function jsonRpcResultResponse(id, result) {
+async function handleOauthMetadata(request, env) {
+  const url = new URL(request.url);
+  const baseUrl = getOauthIssuer(env, url);
+
   return jsonResponse(200, {
-    jsonrpc: "2.0",
-    id,
-    result
+    issuer: baseUrl,
+    authorization_endpoint: `${baseUrl}/oauth/authorize`,
+    token_endpoint: `${baseUrl}/oauth/token`,
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
+    token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
+    code_challenge_methods_supported: ["S256", "plain"],
+    scopes_supported: ["mcp"],
+    revocation_endpoint: `${baseUrl}/oauth/revoke`
   });
+}
+
+async function handleOauthAuthorize(request, env) {
+  const url = new URL(request.url);
+  const responseType = url.searchParams.get("response_type");
+  const clientId = url.searchParams.get("client_id");
+  const redirectUri = url.searchParams.get("redirect_uri");
+  const state = url.searchParams.get("state") || "";
+  const scope = url.searchParams.get("scope") || "mcp";
+  const codeChallenge = url.searchParams.get("code_challenge");
+  const codeChallengeMethod = (url.searchParams.get("code_challenge_method") || "plain").toUpperCase();
+
+  if (responseType !== "code" || !clientId || !redirectUri || !codeChallenge) {
+    return jsonResponse(400, { error: "invalid_request", error_description: "Missing or invalid OAuth authorize parameters" });
+  }
+
+  if (env.OAUTH_CLIENT_ID && clientId !== env.OAUTH_CLIENT_ID) {
+    return jsonResponse(401, { error: "unauthorized_client" });
+  }
+
+  const code = randomToken(32);
+  const cache = getCacheStore(env);
+  const record = {
+    clientId,
+    redirectUri,
+    scope,
+    codeChallenge,
+    codeChallengeMethod,
+    expiresAt: Date.now() + 5 * 60 * 1000
+  };
+  await cache.putJson(`oauth-code:${code}`, record, 5 * 60);
+
+  const redirect = new URL(redirectUri);
+  redirect.searchParams.set("code", code);
+  if (state) {
+    redirect.searchParams.set("state", state);
+  }
+
+  return Response.redirect(redirect.toString(), 302);
+}
+
+async function handleOauthToken(request, env) {
+  const contentType = request.headers.get("content-type") || "";
+  if (!contentType.includes("application/x-www-form-urlencoded")) {
+    return jsonResponse(400, { error: "invalid_request", error_description: "Token endpoint expects application/x-www-form-urlencoded" });
+  }
+
+  const form = await request.formData();
+  const grantType = String(form.get("grant_type") || "");
+  const code = String(form.get("code") || "");
+  const redirectUri = String(form.get("redirect_uri") || "");
+  const codeVerifier = String(form.get("code_verifier") || "");
+  const refreshToken = String(form.get("refresh_token") || "");
+
+  const { clientId, clientSecret } = readClientCredentials(request, form);
+  if (env.OAUTH_CLIENT_ID && clientId && clientId !== env.OAUTH_CLIENT_ID) {
+    return jsonResponse(401, { error: "invalid_client" });
+  }
+  if (env.OAUTH_CLIENT_SECRET && clientSecret !== env.OAUTH_CLIENT_SECRET) {
+    return jsonResponse(401, { error: "invalid_client" });
+  }
+
+  const cache = getCacheStore(env);
+
+  if (grantType === "authorization_code") {
+    if (!code || !redirectUri || !codeVerifier) {
+      return jsonResponse(400, { error: "invalid_request" });
+    }
+
+    const codeRecord = await cache.getJson(`oauth-code:${code}`);
+    if (!codeRecord || codeRecord.expiresAt < Date.now()) {
+      return jsonResponse(400, { error: "invalid_grant" });
+    }
+
+    if (codeRecord.redirectUri !== redirectUri) {
+      return jsonResponse(400, { error: "invalid_grant" });
+    }
+
+    if (!(await verifyCodeChallenge(codeVerifier, codeRecord.codeChallenge, codeRecord.codeChallengeMethod))) {
+      return jsonResponse(400, { error: "invalid_grant" });
+    }
+
+    await cache.delete(`oauth-code:${code}`);
+
+    const issuedAccessToken = randomToken(48);
+    const issuedRefreshToken = randomToken(48);
+    const expiresIn = 3600;
+    await cache.putJson(`oauth-token:${issuedAccessToken}`, { scope: codeRecord.scope, expiresAt: Date.now() + expiresIn * 1000 }, expiresIn);
+    await cache.putJson(`oauth-refresh:${issuedRefreshToken}`, { scope: codeRecord.scope }, 60 * 60 * 24 * 30);
+
+    return jsonResponse(200, {
+      token_type: "Bearer",
+      access_token: issuedAccessToken,
+      expires_in: expiresIn,
+      refresh_token: issuedRefreshToken,
+      scope: codeRecord.scope
+    });
+  }
+
+  if (grantType === "refresh_token") {
+    if (!refreshToken) {
+      return jsonResponse(400, { error: "invalid_request" });
+    }
+
+    const refreshRecord = await cache.getJson(`oauth-refresh:${refreshToken}`);
+    if (!refreshRecord) {
+      return jsonResponse(400, { error: "invalid_grant" });
+    }
+
+    const newAccessToken = randomToken(48);
+    const expiresIn = 3600;
+    await cache.putJson(`oauth-token:${newAccessToken}`, { scope: refreshRecord.scope, expiresAt: Date.now() + expiresIn * 1000 }, expiresIn);
+
+    return jsonResponse(200, {
+      token_type: "Bearer",
+      access_token: newAccessToken,
+      expires_in: expiresIn,
+      refresh_token: refreshToken,
+      scope: refreshRecord.scope
+    });
+  }
+
+  return jsonResponse(400, { error: "unsupported_grant_type" });
+}
+
+
+async function handleOauthRevoke(request, env) {
+  const contentType = request.headers.get("content-type") || "";
+  if (!contentType.includes("application/x-www-form-urlencoded")) {
+    return new Response("", { status: 200 });
+  }
+
+  const form = await request.formData();
+  const token = String(form.get("token") || "");
+  if (token) {
+    const cache = getCacheStore(env);
+    await cache.delete(`oauth-token:${token}`);
+    await cache.delete(`oauth-refresh:${token}`);
+  }
+
+  return new Response("", { status: 200 });
+}
+
+async function isValidOauthToken(env, token) {
+  const record = await getCacheStore(env).getJson(`oauth-token:${token}`);
+  if (!record || !record.expiresAt) {
+    return false;
+  }
+  return record.expiresAt > Date.now();
+}
+
+function readClientCredentials(request, form) {
+  const basic = request.headers.get("authorization");
+  if (basic && basic.toLowerCase().startsWith("basic ")) {
+    try {
+      const decoded = atob(basic.slice(6));
+      const parts = decoded.split(":");
+      return { clientId: parts[0] || "", clientSecret: parts.slice(1).join(":") || "" };
+    } catch {
+      return { clientId: "", clientSecret: "" };
+    }
+  }
+
+  return {
+    clientId: String(form.get("client_id") || ""),
+    clientSecret: String(form.get("client_secret") || "")
+  };
+}
+
+async function verifyCodeChallenge(codeVerifier, expectedChallenge, method) {
+  if (method === "PLAIN") {
+    return codeVerifier === expectedChallenge;
+  }
+
+  if (method !== "S256") {
+    return false;
+  }
+
+  return (await sha256Base64Url(codeVerifier)) === expectedChallenge;
+}
+
+async function sha256Base64Url(input) {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return base64UrlEncode(new Uint8Array(digest));
+}
+
+function base64UrlEncode(bytes) {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function randomToken(byteCount) {
+  const bytes = new Uint8Array(byteCount);
+  crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+function getOauthIssuer(env, url) {
+  return (env.OAUTH_ISSUER_URL || `${url.protocol}//${url.host}`).replace(/\/$/, "");
+}
+
+function getCacheStore(env) {
+  const kv = env.SOFTONECACHE;
+  if (kv && typeof kv.get === "function" && typeof kv.put === "function" && typeof kv.delete === "function") {
+    return {
+      async getText(key) {
+        return kv.get(key);
+      },
+      async putText(key, value, ttlSeconds) {
+        await kv.put(key, value, ttlSeconds ? { expirationTtl: ttlSeconds } : undefined);
+      },
+      async getJson(key) {
+        const text = await kv.get(key);
+        if (!text) {
+          return null;
+        }
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      },
+      async putJson(key, value, ttlSeconds) {
+        await kv.put(key, JSON.stringify(value), ttlSeconds ? { expirationTtl: ttlSeconds } : undefined);
+      },
+      async delete(key) {
+        await kv.delete(key);
+      }
+    };
+  }
+
+  return {
+    async getText(key) {
+      const entry = memoryCache.get(key);
+      if (!entry || isExpired(entry.expiresAt)) {
+        memoryCache.delete(key);
+        return null;
+      }
+      return typeof entry.value === "string" ? entry.value : null;
+    },
+    async putText(key, value, ttlSeconds) {
+      memoryCache.set(key, { value, expiresAt: ttlSeconds ? Date.now() + ttlSeconds * 1000 : null });
+    },
+    async getJson(key) {
+      const entry = memoryCache.get(key);
+      if (!entry || isExpired(entry.expiresAt)) {
+        memoryCache.delete(key);
+        return null;
+      }
+      return typeof entry.value === "object" ? entry.value : null;
+    },
+    async putJson(key, value, ttlSeconds) {
+      memoryCache.set(key, { value, expiresAt: ttlSeconds ? Date.now() + ttlSeconds * 1000 : null });
+    },
+    async delete(key) {
+      memoryCache.delete(key);
+    }
+  };
+}
+
+function isExpired(expiresAt) {
+  return typeof expiresAt === "number" && expiresAt < Date.now();
+}
+
+function jsonRpcResultResponse(id, result) {
+  return jsonResponse(200, { jsonrpc: "2.0", id, result });
 }
 
 function jsonRpcErrorResponse(id, code, message, httpStatus) {
   return jsonResponse(httpStatus || 500, {
     jsonrpc: "2.0",
     id,
-    error: {
-      code,
-      message
-    }
+    error: { code, message }
   });
 }
 
 function jsonResponse(status, data) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      "content-type": "application/json; charset=utf-8"
-    }
+    headers: { "content-type": "application/json; charset=utf-8" }
   });
 }
 

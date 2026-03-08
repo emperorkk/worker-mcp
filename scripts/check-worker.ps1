@@ -70,9 +70,9 @@ try {
   throw "Expected 401 but got HTTP $($unauth.StatusCode)"
 } catch {
   if ($_.Exception.Response -and $_.Exception.Response.StatusCode.value__ -eq 401) {
-    Write-Pass 'POST /mcp without x-mcp-secret returns 401'
+    Write-Pass 'POST /mcp without auth returns 401'
   } else {
-    Write-Fail "POST /mcp without x-mcp-secret - $($_.Exception.Message)"
+    Write-Fail "POST /mcp without auth - $($_.Exception.Message)"
   }
 }
 
