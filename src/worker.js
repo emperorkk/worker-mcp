@@ -428,6 +428,10 @@ async function handleOauthAuthorize(request, env) {
   return Response.redirect(redirect.toString(), 302);
 }
 
+function getOauthClientSecret(env) {
+  return env.OAUTH_CLIENT_SECRET || "softone";
+}
+
 async function handleOauthToken(request, env) {
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.includes("application/x-www-form-urlencoded")) {
@@ -445,7 +449,8 @@ async function handleOauthToken(request, env) {
   if (env.OAUTH_CLIENT_ID && clientId && clientId !== env.OAUTH_CLIENT_ID) {
     return jsonResponse(401, { error: "invalid_client" });
   }
-  if (env.OAUTH_CLIENT_SECRET && clientSecret !== env.OAUTH_CLIENT_SECRET) {
+  const configuredClientSecret = getOauthClientSecret(env);
+  if (clientSecret !== configuredClientSecret) {
     return jsonResponse(401, { error: "invalid_client" });
   }
 

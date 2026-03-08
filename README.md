@@ -39,7 +39,7 @@ https://worker-mcp.kkourentzes.workers.dev/.well-known/oauth-authorization-serve
 
 - `MCP_AUTH_MODE=oauth` (recommended)
 - `OAUTH_CLIENT_ID`
-- `OAUTH_CLIENT_SECRET` (recommended)
+- `OAUTH_CLIENT_SECRET` (set to `softone` if you want the simple default)
 - `OAUTH_ISSUER_URL` (public origin)
 
 Supported auth modes:
@@ -90,12 +90,14 @@ In your custom app MCP server config:
 - Token URL: `https://worker-mcp.kkourentzes.workers.dev/oauth/token`
 - Client ID: value of `OAUTH_CLIENT_ID`
 - Client Secret: value of `OAUTH_CLIENT_SECRET`
+- Client Secret quick-start value: `softone`
 - Scopes: `mcp`
 
 Notes:
 
 - This is the mode your screenshot requires.
 - The previous custom header-only approach is kept for backward compatibility but is not required for ChatGPT OAuth flow.
+- If `OAUTH_CLIENT_SECRET` is unset, the Worker defaults to `softone` (quick-start only; rotate in production).
 
 ## Local development
 
