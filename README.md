@@ -103,7 +103,9 @@ Set the rest as environment variables in Cloudflare Dashboard (Settings -> Varia
 - `SOFTONE_BRANCH`: SoftOne branch code/value
 - `SOFTONE_MODULE`: SoftOne module code/value
 - `SOFTONE_REFID`: SoftOne ref id
-- `MCP_SHARED_SECRET`: shared secret expected in `x-mcp-secret`
+- `MCP_SHARED_SECRET`: legacy shared secret for `x-mcp-secret`
+- `MCP_BEARER_TOKEN`: bearer token used with `Authorization: Bearer <token>`
+- `MCP_AUTH_MODE`: `bearer`, `header`, `either`, or `none`
 - `SOFTONECACHE` (optional binding): KV namespace used for cross-request session cache
 
 Optional:
@@ -218,11 +220,39 @@ This disables telemetry sending in CI and keeps logs quieter.
 
 ## Security
 
-`POST /mcp` requires header:
+`POST /mcp` supports the following authentication modes:
 
-- `x-mcp-secret: <MCP_SHARED_SECRET>`
+- Standard bearer token: `Authorization: Bearer <token>`
+- Legacy header: `x-mcp-secret: <MCP_SHARED_SECRET>`
 
-If missing or invalid, server returns `401`.
+Configure behavior with:
+
+- `MCP_AUTH_MODE=bearer` (recommended for ChatGPT app builder)
+- `MCP_AUTH_MODE=header` (legacy mode)
+- `MCP_AUTH_MODE=either` (default, accepts both)
+- `MCP_AUTH_MODE=none` (not recommended except controlled testing)
+
+Token values:
+
+- `MCP_BEARER_TOKEN` for bearer token auth
+- `MCP_SHARED_SECRET` for legacy header auth
+- If `MCP_BEARER_TOKEN` is missing, bearer mode falls back to `MCP_SHARED_SECRET`
+
+If auth is required and credentials are missing or invalid, server returns `401`.
+
+
+## ChatGPT app builder setup (OAuth-compatible auth)
+
+For the ChatGPT app-builder UI, use standard bearer auth instead of custom headers.
+
+1. Set Worker env vars:
+   - `MCP_AUTH_MODE=bearer`
+   - `MCP_BEARER_TOKEN=<strong-random-token>`
+2. In ChatGPT app builder, choose auth mode that sends a Bearer token in `Authorization` header.
+3. Configure that same token value in the ChatGPT connector/app settings.
+4. Use MCP URL: `https://worker-mcp.kkourentzes.workers.dev/mcp`
+
+Assumption: your current ChatGPT UI does not expose static custom header fields for `x-mcp-secret`, so bearer auth is the compatible path.
 
 ## MCP JSON-RPC examples
 
@@ -231,7 +261,7 @@ If missing or invalid, server returns `401`.
 ```bash
 curl -i -X POST 'http://127.0.0.1:8787/mcp' \
   -H 'content-type: application/json' \
-  -H 'x-mcp-secret: YOUR_SECRET' \
+  -H 'authorization: Bearer YOUR_MCP_BEARER_TOKEN' \
   --data '{
     "jsonrpc": "2.0",
     "id": 1,
@@ -245,7 +275,7 @@ curl -i -X POST 'http://127.0.0.1:8787/mcp' \
 ```bash
 curl -i -X POST 'http://127.0.0.1:8787/mcp' \
   -H 'content-type: application/json' \
-  -H 'x-mcp-secret: YOUR_SECRET' \
+  -H 'authorization: Bearer YOUR_MCP_BEARER_TOKEN' \
   --data '{
     "jsonrpc": "2.0",
     "id": 2,
@@ -259,7 +289,7 @@ curl -i -X POST 'http://127.0.0.1:8787/mcp' \
 ```bash
 curl -i -X POST 'http://127.0.0.1:8787/mcp' \
   -H 'content-type: application/json' \
-  -H 'x-mcp-secret: YOUR_SECRET' \
+  -H 'authorization: Bearer YOUR_MCP_BEARER_TOKEN' \
   --data '{
     "jsonrpc": "2.0",
     "id": 3,
@@ -281,7 +311,8 @@ Run it from PowerShell:
 ```powershell
 pwsh -File .\scripts\check-worker.ps1 `
   -BaseUrl "https://worker-mcp.kkourentzes.workers.dev" `
-  -McpSecret "YOUR_MCP_SHARED_SECRET" `
+  -McpSecret "YOUR_MCP_BEARER_TOKEN" `
+  -AuthMethod bearer `
   -Trdr 1000
 ```
 

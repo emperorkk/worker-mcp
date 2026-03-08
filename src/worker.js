@@ -24,11 +24,40 @@ export default {
 };
 
 function isAuthorized(request, env) {
-  const incomingSecret = request.headers.get("x-mcp-secret");
-  if (!env.MCP_SHARED_SECRET) {
-    return false;
+  const authMode = (env.MCP_AUTH_MODE || "either").toLowerCase();
+  if (authMode === "none") {
+    return true;
   }
-  return incomingSecret === env.MCP_SHARED_SECRET;
+
+  const tokenFromLegacyHeader = request.headers.get("x-mcp-secret");
+  const tokenFromBearer = readBearerToken(request.headers.get("authorization"));
+  const sharedSecret = env.MCP_SHARED_SECRET;
+  const bearerToken = env.MCP_BEARER_TOKEN || env.MCP_SHARED_SECRET;
+
+  const headerIsValid = Boolean(sharedSecret) && tokenFromLegacyHeader === sharedSecret;
+  const bearerIsValid = Boolean(bearerToken) && tokenFromBearer === bearerToken;
+
+  if (authMode === "header") {
+    return headerIsValid;
+  }
+  if (authMode === "bearer") {
+    return bearerIsValid;
+  }
+
+  return headerIsValid || bearerIsValid;
+}
+
+function readBearerToken(authorizationHeader) {
+  if (!authorizationHeader || typeof authorizationHeader !== "string") {
+    return null;
+  }
+
+  const lower = authorizationHeader.toLowerCase();
+  if (!lower.startsWith("bearer ")) {
+    return null;
+  }
+
+  return authorizationHeader.slice(7).trim();
 }
 
 async function handleMcpRequest(request, env) {

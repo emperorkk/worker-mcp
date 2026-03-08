@@ -5,6 +5,9 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$McpSecret,
 
+  [ValidateSet('bearer','header')]
+  [string]$AuthMethod = 'bearer',
+
   [int]$Trdr = 1000
 )
 
@@ -73,7 +76,12 @@ try {
   }
 }
 
-$authHeaders = @{ 'x-mcp-secret' = $McpSecret }
+$authHeaders = @{}
+if ($AuthMethod -eq 'bearer') {
+  $authHeaders['Authorization'] = "Bearer $McpSecret"
+} else {
+  $authHeaders['x-mcp-secret'] = $McpSecret
+}
 
 # 3) initialize
 try {
