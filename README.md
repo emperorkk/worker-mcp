@@ -159,6 +159,23 @@ npm ci && npm run deploy:ci
 
 If your environment does not run `npm ci` first, `npx wrangler deploy --config wrangler.toml` may download Wrangler ad hoc and show warnings like "No lock file has been detected".
 
+
+### If you still get "Could not detect a directory containing static files"
+
+That error usually means the deployment is running in a **Pages/framework auto-detect path** instead of reading Worker config.
+
+Use this checklist:
+
+1. Ensure project root is this repository root.
+2. Set deploy command to:
+
+```bash
+npx wrangler deploy --config wrangler.toml
+```
+
+3. In Cloudflare dashboard, use Worker-style deployment settings (not framework preset auto-detection).
+4. This repo now includes `public/index.html` and `assets.directory = "./public"` as a fallback so auto-detection has a static directory available.
+
 ### Root directory in Cloudflare project settings
 
 Set the Cloudflare project **Root directory** to the folder that contains `wrangler.toml` / `wrangler.json` and `src/worker.js` (this repository root).
