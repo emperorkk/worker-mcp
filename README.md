@@ -55,26 +55,37 @@ Implemented as a **safe stub**.
 npm install
 ```
 
-### 2) Create KV namespace
+### 2) (Optional) Create KV namespace for shared session cache
+
+KV is optional now. If you do not bind `SOFTONECACHE`, the Worker uses an in-memory cache per isolate.
+
+Create KV only if you want better session reuse across isolates:
 
 ```bash
 npx wrangler kv namespace create SOFTONECACHE
 ```
 
-Copy the returned namespace id and update `wrangler.toml`:
-
-```jsonc
-{
-  "kv_namespaces": [
-    {
-      "binding": "SOFTONECACHE",
-      "id": "YOUR_REAL_NAMESPACE_ID"
-    }
-  ]
-}
-```
+Then bind the returned id in `wrangler.toml` / `wrangler.json` or in Cloudflare dashboard Worker bindings.
 
 ### 3) Set required secrets / vars
+
+#### Where to set variables in Cloudflare
+
+For a Worker connected via **Workers Builds**:
+
+1. Cloudflare Dashboard -> **Workers & Pages** -> your Worker (`worker-mcp`)
+2. Open **Settings** -> **Variables and Secrets**
+3. Add plain text values under **Variables**
+4. Add sensitive values under **Secrets**
+
+For CLI deployment, you can also use Wrangler:
+
+```bash
+npx wrangler secret put MCP_SHARED_SECRET
+npx wrangler secret put SOFTONE_PASSWORD
+```
+
+Non-secret values can be set in dashboard variables or via Wrangler config environments.
 
 Set sensitive values as secrets:
 
@@ -83,7 +94,7 @@ npx wrangler secret put MCP_SHARED_SECRET
 npx wrangler secret put SOFTONE_PASSWORD
 ```
 
-Set the rest as environment variables in Cloudflare dashboard or Wrangler config:
+Set the rest as environment variables in Cloudflare Dashboard (Settings -> Variables and Secrets):
 
 - `SOFTONE_URL`: SoftOne WS URL (JSON POST endpoint)
 - `SOFTONE_USER`: SoftOne username
@@ -93,6 +104,7 @@ Set the rest as environment variables in Cloudflare dashboard or Wrangler config
 - `SOFTONE_MODULE`: SoftOne module code/value
 - `SOFTONE_REFID`: SoftOne ref id
 - `MCP_SHARED_SECRET`: shared secret expected in `x-mcp-secret`
+- `SOFTONECACHE` (optional binding): KV namespace used for cross-request session cache
 
 Optional:
 
@@ -181,6 +193,10 @@ npx wrangler deploy --config wrangler.toml
 Set the Cloudflare project **Root directory** to the folder that contains `wrangler.toml` / `wrangler.json` and `src/worker.js` (this repository root).
 
 If root directory points elsewhere, Wrangler cannot discover Worker config and may fail with static-files detection errors.
+
+### Worker name note
+
+Config uses Worker name `worker-mcp` to match Cloudflare CI expected name and avoid name-mismatch warnings.
 
 ### Required CI environment variables
 

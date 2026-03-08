@@ -1,4 +1,5 @@
 const cacheSessionKey = "softone-session";
+const memoryCache = new Map();
 
 export default {
   async fetch(request, env) {
@@ -7,7 +8,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/health") {
       return jsonResponse(200, {
         status: "ok",
-        service: "softone-mcp-worker"
+        service: "worker-mcp"
       });
     }
 
@@ -49,7 +50,7 @@ async function handleMcpRequest(request, env) {
       return jsonRpcResultResponse(requestId, {
         protocolVersion: "2024-11-05",
         serverInfo: {
-          name: "softone-mcp-worker",
+          name: "worker-mcp",
           version: "0.1.0"
         },
         capabilities: {
@@ -267,7 +268,8 @@ function pickFirstCustomerRow(response) {
 }
 
 async function getValidClientId(env) {
-  const cachedClientId = await env.SOFTONECACHE.get(cacheSessionKey);
+  const cache = getCacheStore(env);
+  const cachedClientId = await cache.get(cacheSessionKey);
   if (cachedClientId) {
     return cachedClientId;
   }
@@ -275,8 +277,9 @@ async function getValidClientId(env) {
 }
 
 async function loginAndCacheClientId(env, forceRefresh) {
+  const cache = getCacheStore(env);
   if (forceRefresh) {
-    await env.SOFTONECACHE.delete(cacheSessionKey);
+    await cache.delete(cacheSessionKey);
   }
 
   const loginPayload = {
@@ -297,7 +300,7 @@ async function loginAndCacheClientId(env, forceRefresh) {
     throw new Error("Unable to establish SoftOne session");
   }
 
-  await env.SOFTONECACHE.put(cacheSessionKey, clientId, {
+  await cache.put(cacheSessionKey, clientId, {
     expirationTtl: 60 * 30
   });
 
@@ -311,6 +314,36 @@ async function loginAndCacheClientId(env, forceRefresh) {
   }
 
   return clientId;
+}
+
+
+function getCacheStore(env) {
+  const kv = env.SOFTONECACHE;
+  if (kv && typeof kv.get === "function" && typeof kv.put === "function" && typeof kv.delete === "function") {
+    return kv;
+  }
+
+  return {
+    async get(key) {
+      const entry = memoryCache.get(key);
+      if (!entry) {
+        return null;
+      }
+      if (entry.expiresAt && entry.expiresAt < Date.now()) {
+        memoryCache.delete(key);
+        return null;
+      }
+      return entry.value;
+    },
+    async put(key, value, options) {
+      const ttlSeconds = options?.expirationTtl;
+      const expiresAt = Number.isFinite(ttlSeconds) ? Date.now() + ttlSeconds * 1000 : null;
+      memoryCache.set(key, { value, expiresAt });
+    },
+    async delete(key) {
+      memoryCache.delete(key);
+    }
+  };
 }
 
 function extractClientId(response) {
